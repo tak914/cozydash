@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>COZY PUZZLE DASH 🍃 - Animal Crossing Edition</title>
+    <!-- Google Fonts for Cozy typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;800&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- PeerJS for direct WebRTC multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <!-- Alert Toast -->
+    <div id="toast-banner" class="toast-banner"></div>
+
+    <!-- LOBBY SCREEN -->
+    <div id="lobby-screen">
+        <div class="title-arcade">🍃 COZY PUZZLE DASH 🍃</div>
+        <p class="subtitle">
+            Carrera de puzles relajante estilo Animal Crossing.<br>
+            <strong>Desliza 1 vez por casilla para colocar las cajitas en los tapetes florales.</strong>
+        </p>
+
+        <!-- GAME MODE TABS -->
+        <div class="mode-select-row">
+            <button class="mode-tab-btn active" id="tab-mode-pvp">⚔️ Carrera PvP</button>
+            <button class="mode-tab-btn" id="tab-mode-time">⏱️ Contrarreloj 60s</button>
+        </div>
+
+        <!-- PLAYER COUNT & ROUND TARGET ROW -->
+        <div class="lobby-options-cluster">
+            <!-- PLAYER COUNT SELECTOR -->
+            <div class="player-count-row">
+                <button class="mode-tab-btn active" id="tab-count-2" data-count="2">👥 2 Jugadores</button>
+                <button class="mode-tab-btn" id="tab-count-3" data-count="3">👥 3 Jugadores</button>
+            </div>
+
+            <!-- VICTORY ROUND TARGET SELECTOR -->
+            <div class="round-target-row" id="round-target-row">
+                <span class="option-label">RONDAS PARA GANAR:</span>
+                <div class="target-btn-group" id="target-btn-group">
+                    <button class="target-chip-btn" data-target="3">3</button>
+                    <button class="target-chip-btn active" data-target="5">5</button>
+                    <button class="target-chip-btn" data-target="7">7</button>
+                    <button class="target-chip-btn" data-target="10">10</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CHARACTER SELECTOR (SIN NOMBRES, SOLO AVATARES) -->
+        <div class="char-select-section">
+            <div class="section-label">ELIGE TU PERSONAJE:</div>
+            <div class="char-picker-grid" id="char-picker">
+                <div class="char-card active" data-char="mochi" title="Gato">
+                    <div class="char-avatar">🐱</div>
+                </div>
+                <div class="char-card" data-char="matcha" title="Perro">
+                    <div class="char-avatar">🐶</div>
+                </div>
+                <div class="char-card" data-char="boba" title="Conejo">
+                    <div class="char-avatar">🐰</div>
+                </div>
+                <div class="char-card" data-char="kuma" title="Oso">
+                    <div class="char-avatar">🐻</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Powerups Guide -->
+        <div class="powerups-guide-bar">
+            <span class="guide-chip">💤 Siesta</span>
+            <span class="guide-chip">🦋 Mariposa</span>
+            <span class="guide-chip">🪴 Maceta</span>
+            <span class="guide-chip">☕ Té</span>
+            <span class="guide-chip">🍯 Miel</span>
+            <span class="guide-chip">🛡️ Escudo</span>
+            <span class="guide-chip">🌪️ Viento</span>
+            <span class="guide-chip">🎒 ¡Hasta 3 objetos!</span>
+        </div>
+
+        <!-- Online vs Local Grid -->
+        <div class="lobby-grid">
+            <!-- Host Online -->
+            <div class="lobby-card card-p1">
+                <div>
+                    <div class="card-title p1-color">CREAR SALA ONLINE</div>
+                    <p class="card-desc">
+                        Crea una sala para competir hasta 3 jugadores compartiendo el enlace o código.
+                    </p>
+                </div>
+                <button id="btn-create-room" class="btn btn-p1">Crear Sala (Host)</button>
+            </div>
+
+            <!-- Join Online -->
+            <div class="lobby-card card-p2">
+                <div>
+                    <div class="card-title p2-color">UNIRSE A SALA</div>
+                    <p class="card-desc">
+                        Ingresa el código de 5 letras de la sala para unirte a la partida en vivo.
+                    </p>
+                </div>
+                <div>
+                    <input type="text" id="input-room-code" class="input-code" placeholder="CÓDIGO" maxlength="5">
+                    <button id="btn-join-room" class="btn btn-p2" style="width: 100%;">Unirse a la Partida</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Waiting Host Overlay -->
+        <div id="waiting-box" class="waiting-box">
+            <div class="waiting-title">SALA CREADA: ESPERANDO JUGADORES...</div>
+            <p style="color: var(--ac-wood-light); font-size: 0.9rem; margin-bottom: 12px;">Pásale este código o link a tus amigos:</p>
+            <div class="waiting-code-row">
+                <span id="display-room-code" class="room-code-tag">-----</span>
+                <button id="btn-copy-link" class="btn btn-gold" style="font-size: 0.9rem;">Copiar Enlace Directo</button>
+            </div>
+            <!-- Dynamic Waiting Players List -->
+            <div class="waiting-players-list" id="waiting-players-list">
+                <div class="waiting-player-row ready" id="wait-row-1">
+                    <span class="wait-dot">🟢</span> <span id="wait-name-1">J1 (Tú - 🐱)</span>
+                </div>
+                <div class="waiting-player-row waiting" id="wait-row-2">
+                    <span class="wait-dot">🟡</span> <span id="wait-name-2">J2 (Esperando...)</span>
+                </div>
+                <div class="waiting-player-row waiting" id="wait-row-3" style="display: none;">
+                    <span class="wait-dot">🟡</span> <span id="wait-name-3">J3 (Esperando...)</span>
+                </div>
+            </div>
+            <button id="btn-start-online-now" class="btn btn-leaf" style="margin-top: 12px; width: 100%; display: none;">¡Empezar Partida Ahora!</button>
+        </div>
+
+        <!-- Quick Local Play -->
+        <div class="quick-play-banner">
+            <div style="text-align: left;">
+                <strong style="color: var(--ac-wood-dark); font-size: 1.1rem; font-family: var(--font-heading);" id="local-banner-title">🌿 MODO LOCAL (PROCEDURAL)</strong><br>
+                <span style="color: var(--ac-wood-light); font-size: 0.85rem;" id="local-banner-desc">Puzles infinitos procedimentales con pantallas rivales en vivo arriba.</span>
+            </div>
+            <button id="btn-local-battle" class="btn btn-gold">¡Jugar Ahora!</button>
+        </div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen">
+        <!-- SCOREBOARD HEADER -->
+        <div class="scoreboard-header" id="scoreboard-header">
+            <div class="players-hud-group">
+                <!-- P1 HUD Pill -->
+                <div class="player-hud-pill" id="pill-p1">
+                    <span class="hud-avatar" id="avatar-p1">🐱</span>
+                    <span class="hud-score" id="score-p1">⭐ 0</span>
+                    <div class="inventory-tray" id="tray-p1" title="Mochila">
+                        <div class="inv-slot empty" id="slot-p1-0"><span>-</span></div>
+                        <div class="inv-slot empty" id="slot-p1-1"><span>-</span></div>
+                        <div class="inv-slot empty" id="slot-p1-2"><span>-</span></div>
+                    </div>
+                </div>
+
+                <!-- P2 HUD Pill -->
+                <div class="player-hud-pill" id="pill-p2">
+                    <span class="hud-avatar" id="avatar-p2">🐶</span>
+                    <span class="hud-score" id="score-p2">⭐ 0</span>
+                    <div class="inventory-tray" id="tray-p2" title="Mochila">
+                        <div class="inv-slot empty" id="slot-p2-0"><span>-</span></div>
+                        <div class="inv-slot empty" id="slot-p2-1"><span>-</span></div>
+                        <div class="inv-slot empty" id="slot-p2-2"><span>-</span></div>
+                    </div>
+                </div>
+
+                <!-- P3 HUD Pill (Visible in 3-Player mode) -->
+                <div class="player-hud-pill" id="pill-p3" style="display: none;">
+                    <span class="hud-avatar" id="avatar-p3">🐰</span>
+                    <span class="hud-score" id="score-p3">⭐ 0</span>
+                    <div class="inventory-tray" id="tray-p3" title="Mochila">
+                        <div class="inv-slot empty" id="slot-p3-0"><span>-</span></div>
+                        <div class="inv-slot empty" id="slot-p3-1"><span>-</span></div>
+                        <div class="inv-slot empty" id="slot-p3-2"><span>-</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Central Mode Info / Time Attack Timer -->
+            <div class="hud-center-wrapper">
+                <div class="meta-tag" id="hud-mode-meta">META: 5 RONDAS</div>
+                <div class="score-display-box" id="hud-center-box">
+                    <span id="hud-round-label" style="font-family: var(--font-heading); font-weight: 900; font-size: 1.1rem; color: var(--ac-wood-dark);">Ronda 1</span>
+                </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="header-btns">
+                <button id="btn-sound-toggle" class="btn-icon">🔊</button>
+                <button id="btn-exit-game" class="btn-icon btn-exit-icon">✕</button>
+            </div>
+        </div>
+
+        <!-- ROUND HISTORY TRACKER (Muestra qué personaje ganó cada ronda) -->
+        <div class="round-history-bar" id="round-history-bar">
+            <span>🏁 HISTORIAL:</span>
+            <div class="round-history-chips" id="round-history-chips">
+                <span class="round-chip" id="chip-empty-placeholder">Ronda 1 en curso... 🍃</span>
+            </div>
+        </div>
+
+        <!-- RIVALS MONITOR STRIP (Arriba en chiquito lo que están haciendo los rivales) -->
+        <div class="rivals-monitor-strip" id="rivals-monitor-strip">
+            <!-- Rival 1 Mini Card -->
+            <div class="rival-mini-card targeted" id="rival-card-1" title="Haz clic para apuntarle con tu poder">
+                <div class="rival-mini-header">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span id="rival-mini-avatar-1" style="font-size: 1.25rem;">🐶</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span id="rival-mini-score-1" style="font-weight: 900; color: var(--ac-leaf-dark);">⭐ 0</span>
+                        <span class="target-indicator" id="target-ind-1">🎯 OBJETIVO</span>
+                    </div>
+                </div>
+                <div class="rival-mini-canvas-wrap">
+                    <canvas class="rival-mini-canvas" id="mini-canvas-1" width="160" height="160"></canvas>
+                    <div class="mini-status-badge" id="mini-status-1">💤</div>
+                </div>
+            </div>
+
+            <!-- Rival 2 Mini Card (shown in 3-player match) -->
+            <div class="rival-mini-card" id="rival-card-2" style="display: none;" title="Haz clic para apuntarle con tu poder">
+                <div class="rival-mini-header">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span id="rival-mini-avatar-2" style="font-size: 1.25rem;">🐰</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span id="rival-mini-score-2" style="font-weight: 900; color: var(--ac-leaf-dark);">⭐ 0</span>
+                        <span class="target-indicator" id="target-ind-2">🎯 OBJETIVO</span>
+                    </div>
+                </div>
+                <div class="rival-mini-canvas-wrap">
+                    <canvas class="rival-mini-canvas" id="mini-canvas-2" width="160" height="160"></canvas>
+                    <div class="mini-status-badge" id="mini-status-2">💤</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN ARENA (Tu tablero principal grande y táctil) -->
+        <div class="main-arena-wrapper" id="main-arena-wrapper">
+            <div class="main-arena-box" id="main-arena-box">
+                <div class="arena-tag" id="main-arena-tag">TU TABLERO 🐱</div>
+                <canvas id="main-canvas" width="460" height="460"></canvas>
+                <!-- Overlays -->
+                <div class="freeze-overlay" id="freeze-overlay-main">
+                    <div class="freeze-text">💤 ¡HORA DE LA SIESTA!</div>
+                    <div style="font-size: 1.1rem; margin-top: 4px;">✨ Zzz... descansando ✨</div>
+                </div>
+                <div class="ink-overlay" id="ink-overlay-main">
+                    <svg width="100%" height="100%" viewBox="0 0 460 460">
+                        <circle cx="150" cy="170" r="100" fill="#a0683a" opacity="0.85"/>
+                        <circle cx="310" cy="150" r="110" fill="#8f572c" opacity="0.85"/>
+                        <circle cx="230" cy="330" r="130" fill="#a0683a" opacity="0.85"/>
+                        <circle cx="210" cy="180" r="50" fill="#75431e" opacity="0.9"/>
+                    </svg>
+                </div>
+                <div class="debuff-banner" id="debuff-banner-main">🦋 ¡MARIPOSAS DISTRACTORAS!</div>
+            </div>
+        </div>
+
+        <!-- MOBILE TOUCH CONTROLLER (Swipe gesture hint & Action buttons) -->
+        <div class="touch-controls-bar" id="touch-controls-bar">
+            <!-- Swipe Gesture Hint -->
+            <div class="swipe-hint-pill" id="swipe-hint-pill">
+                👆 <strong>Desliza 1 vez</strong> por casillero
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="touch-actions-cluster">
+                <!-- Reset Board Button -->
+                <button class="touch-round-btn btn-touch-reset" id="btn-touch-reset" title="Reiniciar tablero">
+                    <span class="btn-touch-icon">🔄</span>
+                    <span class="btn-touch-label">REINICIAR</span>
+                </button>
+
+                <!-- Power-Up Fire Button -->
+                <button class="touch-round-btn btn-touch-power" id="btn-touch-power" title="Usar Objeto">
+                    <span class="btn-touch-icon" id="btn-touch-power-icon">🍃</span>
+                    <span class="btn-touch-label" id="btn-touch-power-label">OBJETO (0)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- KEYBOARD HINTS FOR DESKTOP -->
+        <div class="game-footer" id="desktop-footer">
+            <div>
+                <strong class="p1-color">J1:</strong> <span class="keycap">W</span><span class="keycap">A</span><span class="keycap">S</span><span class="keycap">D</span> | Objeto: <span class="keycap">Espacio</span> | Reiniciar: <span class="keycap">R</span>
+            </div>
+            <div id="footer-p2-hint">
+                <strong class="p2-color">J2:</strong> <span class="keycap">↑</span><span class="keycap">←</span><span class="keycap">↓</span><span class="keycap">→</span> | Objeto: <span class="keycap">Enter</span> | Reiniciar: <span class="keycap">P</span>
+            </div>
+            <div id="footer-p3-hint" style="display: none;">
+                <strong class="p3-color">J3:</strong> <span class="keycap">I</span><span class="keycap">J</span><span class="keycap">K</span><span class="keycap">L</span> | Objeto: <span class="keycap">U</span> | Reiniciar: <span class="keycap">O</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ROUND WINNER CELEBRATION MODAL (Toca la pantalla para saltar) -->
+    <div id="round-win-modal" class="round-win-modal" title="Toca en cualquier parte para saltar">
+        <div class="round-win-card">
+            <div class="round-win-trophy">🌻</div>
+            <div class="round-win-title" id="round-win-title">¡RONDA 1 COMPLETADA!</div>
+            <div class="round-win-winner" id="round-win-winner">
+                <span class="round-win-avatar" id="round-win-avatar">🐱</span>
+                <span class="round-win-name" id="round-win-name">¡Ronda ganada por 🐱!</span>
+            </div>
+            <div class="round-win-scoreboard" id="round-win-scoreboard">
+                <!-- Se inyecta dinámicamente con las estrellas de cada avatar -->
+            </div>
+            <div class="round-win-skip-hint">👆 Toca para continuar • Siguiente ronda en 2s...</div>
+        </div>
+    </div>
+
+    <!-- MATCH WIN OVERLAY MODAL -->
+    <div id="win-modal" class="win-modal">
+        <div class="win-content">
+            <div id="win-title" class="win-title p1-color">🎉 ¡FELICITACIONES! 🎉</div>
+            <p id="win-desc" style="font-size: 1.15rem; color: var(--ac-wood-light); margin-bottom: 25px;">Ha completado las rondas con éxito.</p>
+            <div style="display: flex; justify-content: center; gap: 14px; flex-wrap: wrap;">
+                <button id="btn-rematch" class="btn btn-gold">Jugar de Nuevo 🌻</button>
+                <button id="btn-win-exit" class="btn btn-outline">Volver al Menú</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="sound.js"></script>
+    <script src="levels.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
