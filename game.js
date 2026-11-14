@@ -3,7 +3,6 @@
     'use strict';
 
     // Game Constants & Configuration
-    const TARGET_SCORE = 5;
     const TIME_ATTACK_TOTAL = 60.0;
     const RECORD_KEY = 'cozy_dash_record_v1';
 
@@ -17,11 +16,12 @@
         { id: 'WIND',    name: 'RÁFAGA VIENTO', icon: '🌪️', desc: 'Descoloca una caja rival' }
     ];
 
+    // Characters without fictional names - pure avatars/emojis
     const CHARACTERS = {
-        mochi:  { id: 'mochi',  name: 'Mochi 🐱',  avatar: '🐱', color: '#f07b65', earColor: '#f07b65', earType: 'cat' },
-        matcha: { id: 'matcha', name: 'Matcha 🐶', avatar: '🐶', color: '#5ea848', earColor: '#438230', earType: 'dog' },
-        boba:   { id: 'boba',   name: 'Boba 🐰',   avatar: '🐰', color: '#9d72b8', earColor: '#8456a0', earType: 'bunny' },
-        kuma:   { id: 'kuma',   name: 'Kuma 🐻',   avatar: '🐻', color: '#c68642', earColor: '#a76527', earType: 'bear' }
+        mochi:  { id: 'mochi',  avatar: '🐱', color: '#f07b65', earColor: '#f07b65', earType: 'cat' },
+        matcha: { id: 'matcha', avatar: '🐶', color: '#5ea848', earColor: '#438230', earType: 'dog' },
+        boba:   { id: 'boba',   avatar: '🐰', color: '#9d72b8', earColor: '#8456a0', earType: 'bunny' },
+        kuma:   { id: 'kuma',   avatar: '🐻', color: '#c68642', earColor: '#a76527', earType: 'bear' }
     };
 
     // DOM Elements - Lobby
@@ -32,6 +32,8 @@
     const tabModeTime = document.getElementById('tab-mode-time');
     const tabCount2 = document.getElementById('tab-count-2');
     const tabCount3 = document.getElementById('tab-count-3');
+    const roundTargetRow = document.getElementById('round-target-row');
+    const targetBtns = document.querySelectorAll('.target-chip-btn');
     const localBannerTitle = document.getElementById('local-banner-title');
     const localBannerDesc = document.getElementById('local-banner-desc');
     const btnCreateRoom = document.getElementById('btn-create-room');
@@ -58,9 +60,6 @@
     const pillP1 = document.getElementById('pill-p1');
     const pillP2 = document.getElementById('pill-p2');
     const pillP3 = document.getElementById('pill-p3');
-    const hudP1Name = document.getElementById('hud-p1-name');
-    const hudP2Name = document.getElementById('hud-p2-name');
-    const hudP3Name = document.getElementById('hud-p3-name');
     const avatarP1 = document.getElementById('avatar-p1');
     const avatarP2 = document.getElementById('avatar-p2');
     const avatarP3 = document.getElementById('avatar-p3');
@@ -98,8 +97,6 @@
     const ctxMini2 = miniCanvas2 ? miniCanvas2.getContext('2d') : null;
     const rivalMiniAvatar1 = document.getElementById('rival-mini-avatar-1');
     const rivalMiniAvatar2 = document.getElementById('rival-mini-avatar-2');
-    const rivalMiniName1 = document.getElementById('rival-mini-name-1');
-    const rivalMiniName2 = document.getElementById('rival-mini-name-2');
     const rivalMiniScore1 = document.getElementById('rival-mini-score-1');
     const rivalMiniScore2 = document.getElementById('rival-mini-score-2');
     const targetInd1 = document.getElementById('target-ind-1');
@@ -143,12 +140,14 @@
     // Game Mode & Match State
     let selectedGameType = 'pvp'; // 'pvp' or 'time_attack'
     let maxPlayers = 2;           // 2 or 3 players
+    let targetScore = 5;          // Configurable rounds to win (3, 5, 7, 10)
     let matchSessionMode = 'local'; // 'local', 'online_host', 'online_client'
     let localPlayerId = 1;        // 1 (host), 2 (client 1), 3 (client 2)
     let currentLevelIndex = 0;
     let currentRoundNumber = 1;
     let isMatchOver = false;
     let isRoundTransitioning = false;
+    let roundTransitionTimeout = null;
     let levelStartTime = 0;
 
     // Time Attack Engine State
@@ -233,8 +232,10 @@
         setupCharacterPicker();
         setupModeTabs();
         setupPlayerCountTabs();
+        setupTargetScoreSelector();
         setupDiscreteTouchSwipe();
         setupRivalTargetingClicks();
+        setupRoundWinModalSkip();
 
         btnCreateRoom.addEventListener('click', startOnlineHost);
         btnJoinRoom.addEventListener('click', startOnlineClient);
@@ -302,13 +303,52 @@
     }
 
     // -------------------------------------------------------------
-    // Mode & Player Count Selectors
+    // Skip Round Winner Modal on Any Touch / Click
+    // -------------------------------------------------------------
+    function setupRoundWinModalSkip() {
+        // Tapping or clicking directly on the modal or anywhere on screen skips it immediately
+        roundWinModal.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            skipRoundWinCelebration();
+        });
+
+        window.addEventListener('pointerdown', () => {
+            if (isRoundTransitioning && roundWinModal.style.display === 'flex') {
+                skipRoundWinCelebration();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (isRoundTransitioning && roundWinModal.style.display === 'flex') {
+                skipRoundWinCelebration();
+            }
+        });
+    }
+
+    function skipRoundWinCelebration() {
+        if (!isRoundTransitioning || roundWinModal.style.display !== 'flex') return;
+
+        if (roundTransitionTimeout) {
+            clearTimeout(roundTransitionTimeout);
+            roundTransitionTimeout = null;
+        }
+
+        roundWinModal.style.display = 'none';
+        isRoundTransitioning = false;
+        currentRoundNumber++;
+        loadRoundLevel(currentLevelIndex + 1);
+    }
+
+    // -------------------------------------------------------------
+    // Mode, Player Count & Target Rounds Selectors
     // -------------------------------------------------------------
     function setupModeTabs() {
         tabModePvp.addEventListener('click', () => {
             selectedGameType = 'pvp';
             tabModePvp.classList.add('active');
             tabModeTime.classList.remove('active');
+            roundTargetRow.style.display = 'flex';
             updateLobbyRecordDisplay();
             window.sounds.playMove();
         });
@@ -317,6 +357,7 @@
             selectedGameType = 'time_attack';
             tabModeTime.classList.add('active');
             tabModePvp.classList.remove('active');
+            roundTargetRow.style.display = 'none';
             updateLobbyRecordDisplay();
             window.sounds.playMove();
         });
@@ -340,6 +381,18 @@
         });
     }
 
+    function setupTargetScoreSelector() {
+        targetBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                targetBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                targetScore = parseInt(btn.getAttribute('data-target'), 10) || 5;
+                updateLobbyRecordDisplay();
+                window.sounds.playMove();
+            });
+        });
+    }
+
     function updateLobbyPlayerSlots() {
         if (maxPlayers === 3) {
             waitRow3.style.display = 'flex';
@@ -352,16 +405,18 @@
     function updateLobbyRecordDisplay() {
         personalRecord = parseInt(localStorage.getItem(RECORD_KEY) || '0', 10);
         if (selectedGameType === 'pvp') {
-            localBannerTitle.textContent = `🌿 MODO LOCAL (${maxPlayers} JUGADORES)`;
-            localBannerDesc.textContent = `Carrera al primero que gane 5 rondas. ¡Con pantallas rivales en vivo arriba!`;
+            localBannerTitle.textContent = `🌿 MODO LOCAL (PROCEDURAL - ${maxPlayers} JUGADORES)`;
+            localBannerDesc.textContent = `Puzles 100% procedurales. Carrera al primero a ${targetScore} rondas.`;
+            hudModeMeta.textContent = `META: ${targetScore} RONDAS`;
         } else {
             localBannerTitle.textContent = `⏱️ CONTRARRELOJ 60s (Récord: ${personalRecord} 🏆)`;
             localBannerDesc.textContent = `¿Cuántos puzles puedes resolver en 1 minuto? ¡Puzles procedurables infinitos!`;
+            hudModeMeta.textContent = '⏱️ CONTRARRELOJ 60s';
         }
     }
 
     // -------------------------------------------------------------
-    // Character Selector
+    // Character Selector (Avatares limpios sin nombres)
     // -------------------------------------------------------------
     function setupCharacterPicker() {
         const cards = charPicker.querySelectorAll('.char-card');
@@ -371,7 +426,7 @@
                 card.classList.add('active');
                 selectedCharId = card.getAttribute('data-char');
                 players[0].char = CHARACTERS[selectedCharId];
-                waitName1.textContent = `Jugador 1 (Tú - ${players[0].char.name})`;
+                waitName1.textContent = `J1 (Tú - ${players[0].char.avatar})`;
                 window.sounds.playMove();
             });
         });
@@ -444,7 +499,6 @@
         if (activeRivals.length === 0) return players[0];
         if (activeRivals.length === 1) return activeRivals[0];
 
-        // If targeted rival is chosen, use it
         if (targetedRivalId) {
             const chosen = activeRivals.find(p => p.id === targetedRivalId);
             if (chosen) return chosen;
@@ -463,7 +517,7 @@
                     targetedRivalId = rivals[0].id;
                     updateTargetVisuals();
                     window.sounds.playMove();
-                    showToast(`🎯 Objetivo: ${rivals[0].char.name}`, 1200);
+                    showToast(`🎯 Objetivo: ${rivals[0].char.avatar}`, 1200);
                 }
             });
         }
@@ -474,7 +528,7 @@
                     targetedRivalId = rivals[1].id;
                     updateTargetVisuals();
                     window.sounds.playMove();
-                    showToast(`🎯 Objetivo: ${rivals[1].char.name}`, 1200);
+                    showToast(`🎯 Objetivo: ${rivals[1].char.avatar}`, 1200);
                 }
             });
         }
@@ -546,7 +600,7 @@
             clearPlayerDebuffs(p);
         });
 
-        // Setup characters
+        // Setup characters without fictional names
         players[0].char = CHARACTERS[selectedCharId];
         const remainingChars = Object.keys(CHARACTERS).filter(k => k !== selectedCharId);
         players[1].char = CHARACTERS[remainingChars[0] || 'matcha'];
@@ -585,7 +639,7 @@
             hudModeMeta.textContent = '⏱️ CONTRARRELOJ 60s';
             startTimeAttackTimer();
         } else {
-            hudModeMeta.textContent = 'META: 5 RONDAS';
+            hudModeMeta.textContent = `META: ${targetScore} RONDAS`;
             stopTimeAttackTimer();
         }
 
@@ -594,28 +648,20 @@
 
     function updateHUDNames() {
         const local = getLocalPlayer();
-        mainArenaTag.textContent = `TU TABLERO (${local.char.name})`;
+        mainArenaTag.textContent = `TU TABLERO ${local.char.avatar}`;
         mainArenaTag.style.color = local.char.color;
 
-        hudP1Name.textContent = players[0].char.name;
         avatarP1.textContent = players[0].char.avatar;
-
-        hudP2Name.textContent = players[1].char.name;
         avatarP2.textContent = players[1].char.avatar;
-
-        hudP3Name.textContent = players[2].char.name;
         avatarP3.textContent = players[2].char.avatar;
 
-        // Update Rivals Strip Titles
         const rivals = getRivalsForLocalPlayer();
         if (rivals[0]) {
             rivalMiniAvatar1.textContent = rivals[0].char.avatar;
-            rivalMiniName1.textContent = rivals[0].char.name;
             rivalMiniScore1.textContent = `⭐ ${rivals[0].score}`;
         }
         if (rivals[1] && maxPlayers === 3) {
             rivalMiniAvatar2.textContent = rivals[1].char.avatar;
-            rivalMiniName2.textContent = rivals[1].char.name;
             rivalMiniScore2.textContent = `⭐ ${rivals[1].score}`;
         }
     }
@@ -642,12 +688,14 @@
 
         if (selectedGameType === 'time_attack') {
             startTimeAttackTimer();
+        } else {
+            hudModeMeta.textContent = `META: ${targetScore} RONDAS`;
         }
 
         loadRoundLevel(0);
 
         if (netConnections.length > 0 && isHost) {
-            broadcast({ type: 'MATCH_RESTART', gameType: selectedGameType });
+            broadcast({ type: 'MATCH_RESTART', gameType: selectedGameType, targetScore });
         }
     }
 
@@ -711,11 +759,11 @@
             localStorage.setItem(RECORD_KEY, personalRecord.toString());
             winTitle.textContent = `🏆 ¡NUEVO RÉCORD CONTRARRELOJ! 🏆`;
             winTitle.className = 'win-title p1-color';
-            winDesc.textContent = `¡Fabuloso! ${winner.char.name} resolvió ${winner.score} puzles en 1 minuto.`;
+            winDesc.textContent = `¡Fabuloso! ${winner.char.avatar} resolvió ${winner.score} puzles en 1 minuto.`;
         } else {
             winTitle.textContent = `⏱️ ¡TIEMPO CUMPLIDO! ⏱️`;
             winTitle.className = 'win-title p1-color';
-            winDesc.textContent = `Ganador: ${winner.char.name} con ${winner.score} puzles resueltos. (Récord: ${personalRecord})`;
+            winDesc.textContent = `Ganador: ${winner.char.avatar} con ${winner.score} puzles resueltos. (Récord: ${personalRecord})`;
         }
 
         winModal.style.display = 'flex';
@@ -730,21 +778,17 @@
     }
 
     // -------------------------------------------------------------
-    // Level Loading (Handcrafted + Procedural Generator)
+    // Level Loading (100% Procedural Generator for Both Normal & Time Attack!)
     // -------------------------------------------------------------
     function loadRoundLevel(levelIdx, syncSeed = null) {
         currentLevelIndex = levelIdx;
         levelStartTime = Date.now();
 
-        let baseTemplate;
-        if (selectedGameType === 'time_attack' || levelIdx >= DASH_LEVELS.length) {
-            const seed = syncSeed || (Date.now() + levelIdx * 1337);
-            baseTemplate = generateProceduralLevel(seed);
-        } else {
-            baseTemplate = cloneLevelData(DASH_LEVELS[levelIdx]);
-        }
+        // GUARANTEED PROCEDURAL LEVEL: 100% solvable, infinite unique layouts!
+        const seed = syncSeed || (Date.now() + levelIdx * 1337 + currentRoundNumber * 97);
+        const baseTemplate = generateProceduralLevel(seed);
 
-        // Initialize all active players with identical puzzle boards
+        // Initialize all active players with identical procedural puzzle boards
         players.slice(0, maxPlayers).forEach(p => {
             p.board = cloneLevelData(baseTemplate);
             p.x = p.board.playerSpawn.x;
@@ -762,7 +806,7 @@
 
         const toastMsg = selectedGameType === 'time_attack' 
             ? `⏱️ Puzle ${currentRoundNumber} 🍃` 
-            : `🍃 ¡Comienza la Ronda ${currentRoundNumber}! 🍃`;
+            : `🍃 ¡Ronda ${currentRoundNumber} (Procedural)! 🍃`;
         showToast(toastMsg, 1600);
         window.sounds.playSpeed();
     }
@@ -828,9 +872,7 @@
     }
 
     function resetCurrentPlayerBoard(p) {
-        const baseLevel = (selectedGameType === 'time_attack' || currentLevelIndex >= DASH_LEVELS.length)
-            ? generateProceduralLevel(Date.now() + currentLevelIndex * 777)
-            : DASH_LEVELS[currentLevelIndex];
+        const baseLevel = generateProceduralLevel(Date.now() + currentLevelIndex * 777);
 
         p.board = cloneLevelData(baseLevel);
         cacheBoardBackground(p.board);
@@ -1035,7 +1077,7 @@
                     showToast(`⚡ ¡COMBO VELOZ! +2.5s ⏱️`, 1800);
                     window.sounds.playSpeed();
                 } else {
-                    showToast(`¡Puzle superado por ${player.char.name}!`, 1400);
+                    showToast(`¡Puzle superado por ${player.char.avatar}!`, 1400);
                 }
 
                 currentRoundNumber++;
@@ -1045,7 +1087,7 @@
                 }, 400);
 
             } else {
-                // PvP Mode: Show Round Win Celebration Modal
+                // PvP Mode: Show Round Win Celebration Modal (Can be skipped by touching!)
                 showRoundWinCelebration(player);
 
                 if (isHost) {
@@ -1059,16 +1101,13 @@
                 }
 
                 // Check if match won
-                if (player.score >= TARGET_SCORE) {
-                    setTimeout(() => {
+                if (player.score >= targetScore) {
+                    roundTransitionTimeout = setTimeout(() => {
                         triggerMatchWin(player);
                     }, 2400);
                 } else {
-                    setTimeout(() => {
-                        roundWinModal.style.display = 'none';
-                        isRoundTransitioning = false;
-                        currentRoundNumber++;
-                        loadRoundLevel(currentLevelIndex + 1);
+                    roundTransitionTimeout = setTimeout(() => {
+                        skipRoundWinCelebration();
                     }, 2400);
                 }
             }
@@ -1078,12 +1117,12 @@
     function showRoundWinCelebration(winner) {
         roundWinTitle.textContent = `¡RONDA ${currentRoundNumber} COMPLETADA!`;
         roundWinAvatar.textContent = winner.char.avatar;
-        roundWinName.textContent = `¡${winner.char.name} fue el más rápido! 🌻`;
+        roundWinName.textContent = `¡Ronda ganada por ${winner.char.avatar}! 🌻`;
 
         // Render scores of all active players
         const activePlayers = players.slice(0, maxPlayers);
         roundWinScoreboard.innerHTML = activePlayers
-            .map(p => `<span>${p.char.avatar} ${p.char.name}: <strong>${p.score}</strong></span>`)
+            .map(p => `<span>${p.char.avatar}: <strong>${p.score}</strong></span>`)
             .join(' • ');
 
         roundWinModal.style.display = 'flex';
@@ -1098,7 +1137,7 @@
 
         roundHistoryChips.innerHTML = roundHistory.map(r => `
             <span class="round-chip win-chip">
-                R${r.round}: ${r.winnerChar.avatar} ${r.winnerChar.name.split(' ')[0]}
+                R${r.round}: ${r.winnerChar.avatar}
             </span>
         `).join('');
     }
@@ -1111,12 +1150,12 @@
         const activePlayers = players.slice(0, maxPlayers);
         activePlayers.sort((a, b) => b.score - a.score);
 
-        winTitle.textContent = `🎉 ¡${winner.char.name} ES EL CAMPEÓN! 🎉`;
+        winTitle.textContent = `🎉 ¡EL GANADOR ES ${winner.char.avatar}! 🎉`;
         winTitle.className = 'win-title p1-color';
 
         const podiumText = activePlayers.map((p, idx) => {
             const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : '🥉');
-            return `${medal} ${p.char.name}: ${p.score} rondas`;
+            return `${medal} ${p.char.avatar}: ${p.score} rondas`;
         }).join('<br>');
 
         winDesc.innerHTML = `<strong>¡Podio Campestre!</strong><br>${podiumText}`;
@@ -1166,7 +1205,7 @@
             if (target.shieldActive) {
                 target.shieldActive = false;
                 window.sounds.playShield();
-                showToast(`🛡️ ¡El Escudo Floral de ${target.char.name} bloqueó ${power.name}!`, 2500);
+                showToast(`🛡️ ¡El Escudo Floral de ${target.char.avatar} bloqueó ${power.name}!`, 2500);
                 spawnBurstParticles(target, target.x, target.y, '#5ea848', 'leaf', 18);
 
                 sendNetworkMessage({
@@ -1180,23 +1219,23 @@
             if (power.id === 'FREEZE') {
                 target.frozenUntil = now + 2500;
                 window.sounds.playFreeze();
-                showToast(`💤 ¡Hora de la siesta para ${target.char.name}! (2.5s)`, 2200);
+                showToast(`💤 ¡Hora de la siesta para ${target.char.avatar}! (2.5s)`, 2200);
             } else if (power.id === 'REVERSE') {
                 target.reversedUntil = now + 4000;
                 window.sounds.playReverse();
-                showToast(`🦋 ¡Mariposas despistaron a ${target.char.name}! (4s)`, 2200);
+                showToast(`🦋 ¡Mariposas despistaron a ${target.char.avatar}! (4s)`, 2200);
             } else if (power.id === 'ROCK') {
                 spawnTrashRockOnTarget(target);
                 window.sounds.playTrashRock();
-                showToast(`🪴 ¡Macetita plantada para ${target.char.name}!`, 1800);
+                showToast(`🪴 ¡Macetita plantada para ${target.char.avatar}!`, 1800);
             } else if (power.id === 'INK') {
                 target.inkUntil = now + 3500;
                 window.sounds.playInk();
-                showToast(`☕ ¡Té tibio derramado en la pantalla de ${target.char.name}!`, 2200);
+                showToast(`☕ ¡Té tibio derramado en la pantalla de ${target.char.avatar}!`, 2200);
             } else if (power.id === 'WIND') {
                 executeWindGust(target);
                 window.sounds.playWind();
-                showToast(`🌪️ ¡Ráfaga de viento descolocó una caja de ${target.char.name}!`, 2000);
+                showToast(`🌪️ ¡Ráfaga de viento descolocó una caja de ${target.char.avatar}!`, 2000);
             }
         }
 
@@ -1380,11 +1419,9 @@
             if (now - p.lastBotActionTime < 550) return; // Action interval
             p.lastBotActionTime = now;
 
-            // Find an unsolved box
             const unplacedBox = p.board.boxes.find(b => !p.board.targets.some(t => t.x === b.x && t.y === b.y));
             if (!unplacedBox) return;
 
-            // Step toward the box or nudge it
             const dx = Math.sign(unplacedBox.x - p.x);
             const dy = Math.sign(unplacedBox.y - p.y);
 
@@ -1461,7 +1498,6 @@
         requestAnimationFrame(gameLoop);
     }
 
-    // High performance scaled render for Rival Mini-Canvases
     function renderArenaScaled(ctx, player, width, height) {
         ctx.save();
         ctx.clearRect(0, 0, width, height);
@@ -1599,7 +1635,7 @@
             ctx.fill();
         });
 
-        // Player & Shield Aura
+        // Player Avatar & Shield Aura
         renderPlayerAvatar(ctx, player, tileSize);
 
         // Particles
@@ -1725,18 +1761,17 @@
             }
 
             netConnections.push(conn);
-            const assignedPlayerId = netConnections.length + 1; // 2 or 3
+            const assignedPlayerId = netConnections.length + 1;
 
             conn.on('open', () => {
                 showToast(`¡Amigo conectado como Jugador ${assignedPlayerId}!`, 2500);
 
-                // Update lobby waiting list
                 if (assignedPlayerId === 2) {
                     waitRow2.className = 'waiting-player-row ready';
-                    waitName2.textContent = `Jugador 2 (Conectado)`;
+                    waitName2.textContent = `J2 (${players[1].char.avatar} Conectado)`;
                 } else if (assignedPlayerId === 3) {
                     waitRow3.className = 'waiting-player-row ready';
-                    waitName3.textContent = `Jugador 3 (Conectado)`;
+                    waitName3.textContent = `J3 (${players[2].char.avatar} Conectado)`;
                 }
 
                 conn.send({
@@ -1744,10 +1779,10 @@
                     assignedPlayerId,
                     maxPlayers,
                     gameType: selectedGameType,
+                    targetScore,
                     hostCharId: selectedCharId
                 });
 
-                // Auto-start if room is full
                 if (netConnections.length === maxPlayers - 1) {
                     setTimeout(() => {
                         broadcast({ type: 'HOST_START_NOW' });
@@ -1757,7 +1792,6 @@
             });
 
             conn.on('data', data => {
-                // Relay to other clients (star topology)
                 netConnections.forEach(c => {
                     if (c !== conn && c.open) c.send(data);
                 });
@@ -1835,6 +1869,7 @@
             localPlayerId = data.assignedPlayerId;
             maxPlayers = data.maxPlayers;
             selectedGameType = data.gameType;
+            if (data.targetScore) targetScore = data.targetScore;
             if (data.hostCharId) players[0].char = CHARACTERS[data.hostCharId];
             showToast(`¡Unido como Jugador ${localPlayerId}!`, 2500);
         } else if (data.type === 'HOST_START_NOW') {
@@ -1885,10 +1920,8 @@
             renderRoundHistory();
             showRoundWinCelebration(winner);
 
-            setTimeout(() => {
-                roundWinModal.style.display = 'none';
-                currentRoundNumber++;
-                loadRoundLevel(data.nextLevelIndex);
+            roundTransitionTimeout = setTimeout(() => {
+                skipRoundWinCelebration();
             }, 2400);
         } else if (data.type === 'MATCH_WIN') {
             const winner = players[data.winnerId - 1];
@@ -1896,6 +1929,7 @@
         } else if (data.type === 'TIME_ATTACK_OVER') {
             triggerTimeAttackOver();
         } else if (data.type === 'MATCH_RESTART') {
+            if (data.targetScore) targetScore = data.targetScore;
             resetMatch();
         } else if (data.type === 'BOARD_RESET') {
             const p = players[data.playerId - 1];
@@ -1915,6 +1949,10 @@
 
     function returnToLobby() {
         stopTimeAttackTimer();
+        if (roundTransitionTimeout) {
+            clearTimeout(roundTransitionTimeout);
+            roundTransitionTimeout = null;
+        }
         gameScreen.style.display = 'none';
         lobbyScreen.style.display = 'block';
         waitingBox.style.display = 'none';
