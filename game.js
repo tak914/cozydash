@@ -1728,6 +1728,17 @@
     // -------------------------------------------------------------
     // Multiplayer WebRTC (PeerJS - Up to 3 Players)
     // -------------------------------------------------------------
+    const PEER_CONFIG = {
+        debug: 1,
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' }
+            ]
+        }
+    };
+
     function generateRoomCode() {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         let code = '';
@@ -1741,16 +1752,20 @@
 
         displayRoomCode.textContent = roomCode;
         waitingBox.style.display = 'block';
-        showToast("Creando sala online...");
+        showToast("Conectando con el servidor PeerJS...");
 
-        peer = new Peer(peerId);
+        if (peer) {
+            try { peer.destroy(); } catch(e) {}
+        }
+
+        peer = new Peer(peerId, PEER_CONFIG);
         netConnections = [];
 
         peer.on('open', () => {
             isHost = true;
             localPlayerId = 1;
             btnStartOnlineNow.style.display = 'block';
-            showToast(`Sala: ${roomCode}. ¡Invita hasta a ${maxPlayers - 1} amigos!`, 5000);
+            showToast(`¡Sala ${roomCode} lista! Invita hasta ${maxPlayers - 1} amigos.`, 4000);
         });
 
         peer.on('connection', conn => {
@@ -1806,28 +1821,37 @@
 
         peer.on('error', err => {
             console.error("Peer error:", err);
-            showToast("Error de conexión: " + err.type, 4000);
+            if (err.type === 'unavailable-id') {
+                showToast("Código en uso, reintentando...", 2500);
+                setTimeout(startOnlineHost, 500);
+            } else {
+                showToast("Error de conexión PeerJS: " + err.type, 4000);
+            }
         });
     }
 
     function startOnlineClient() {
         const roomCode = inputRoomCode.value.trim().toUpperCase();
         if (!roomCode || roomCode.length < 4) {
-            alert("Por favor ingresa un código de sala válido.");
+            alert("Por favor ingresa un código de sala válido (5 letras).");
             return;
         }
 
         const hostPeerId = `sdash-${roomCode}`;
-        showToast("Buscando sala...");
+        showToast(`Buscando la sala ${roomCode}...`);
 
-        peer = new Peer();
+        if (peer) {
+            try { peer.destroy(); } catch(e) {}
+        }
+
+        peer = new Peer(PEER_CONFIG);
 
         peer.on('open', () => {
             isHost = false;
-            clientConn = peer.connect(hostPeerId);
+            clientConn = peer.connect(hostPeerId, { reliable: true });
 
             clientConn.on('open', () => {
-                showToast("¡Conectado a la sala!", 2500);
+                showToast("¡Conectado con éxito a la sala!", 2500);
                 clientConn.send({
                     type: 'CHAR_SELECT',
                     charId: selectedCharId
@@ -1846,7 +1870,7 @@
 
         peer.on('error', err => {
             console.error("Peer error:", err);
-            showToast("No se pudo conectar a la sala " + roomCode, 4000);
+            showToast("No se encontró la sala " + roomCode + ". Verifica el código.", 4500);
         });
     }
 
@@ -1939,9 +1963,17 @@
 
     function copyDirectLink() {
         const code = displayRoomCode.textContent;
+        if (window.location.protocol === 'file:') {
+            navigator.clipboard.writeText(code).then(() => {
+                showToast(`Código: ${code} copiado. (En file:// tus amigos deben ingresar este código de 5 letras)`, 4000);
+            }).catch(() => {
+                showToast(`Código de sala: ${code}`, 3000);
+            });
+            return;
+        }
         const url = `${window.location.origin}${window.location.pathname}#room=${code}`;
         navigator.clipboard.writeText(url).then(() => {
-            showToast("¡Enlace copiado! Pásaselo a tus amigos.");
+            showToast("¡Enlace directo copiado! Pásaselo a tus amigos.");
         }).catch(() => {
             showToast(`Código de sala: ${code}`);
         });
