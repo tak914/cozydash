@@ -40,6 +40,7 @@
     const btnJoinRoom = document.getElementById('btn-join-room');
     const btnLocalBattle = document.getElementById('btn-local-battle');
     const inputRoomCode = document.getElementById('input-room-code');
+    const inputPlayerName = document.getElementById('input-player-name');
     const waitingBox = document.getElementById('waiting-box');
     const displayRoomCode = document.getElementById('display-room-code');
     const waitingTitle = document.getElementById('waiting-title');
@@ -165,8 +166,10 @@
     // Targeting in 3-Player Matches: Holds rival player ID currently targeted
     let targetedRivalId = null;
 
-    // Selected Character in Lobby
+    // Selected Character & Name in Lobby
     let selectedCharId = 'mochi';
+    let localPlayerName = localStorage.getItem('cozy_dash_name') || 'Aldeano';
+    let currentBaseTemplate = null;
 
     // Networking (PeerJS)
     let peer = null;
@@ -188,6 +191,7 @@
     function createPlayerState(id, defaultCharId) {
         return {
             id,
+            name: `J${id}`,
             char: CHARACTERS[defaultCharId],
             score: 0,
             x: 2,
@@ -240,6 +244,27 @@
         setupDiscreteTouchSwipe();
         setupRivalTargetingClicks();
         setupRoundWinModalSkip();
+
+        if (inputPlayerName) {
+            inputPlayerName.value = localPlayerName;
+            inputPlayerName.addEventListener('input', () => {
+                const val = inputPlayerName.value.trim();
+                localPlayerName = val || 'Aldeano';
+                localStorage.setItem('cozy_dash_name', localPlayerName);
+                if (players[localPlayerId - 1]) {
+                    players[localPlayerId - 1].name = localPlayerName;
+                }
+                if (isHost && waitName1) {
+                    waitName1.textContent = `J1 (${localPlayerName} - ${players[0].char.avatar})`;
+                }
+                updateHUDNames();
+                sendNetworkMessage({
+                    type: 'PLAYER_NAME_UPDATE',
+                    playerId: localPlayerId,
+                    name: localPlayerName
+                });
+            });
+        }
 
         btnCreateRoom.addEventListener('click', startOnlineHost);
         btnJoinRoom.addEventListener('click', startOnlineClient);
@@ -636,16 +661,20 @@
             clearPlayerDebuffs(p);
         });
 
-        // Setup characters without fictional names
+        // Setup characters and names
         if (sessionMode === 'local' || sessionMode === 'online_host') {
+            players[0].name = localPlayerName;
             players[0].char = CHARACTERS[selectedCharId];
             const remainingChars = Object.keys(CHARACTERS).filter(k => k !== selectedCharId);
             if (sessionMode === 'local') {
+                players[1].name = 'Bot 1';
                 players[1].char = CHARACTERS[remainingChars[0] || 'matcha'];
+                players[2].name = 'Bot 2';
                 players[2].char = CHARACTERS[remainingChars[1] || 'boba'];
             }
         } else if (sessionMode === 'online_client') {
             if (players[localPlayerId - 1]) {
+                players[localPlayerId - 1].name = localPlayerName;
                 players[localPlayerId - 1].char = CHARACTERS[selectedCharId];
             }
         }
@@ -692,7 +721,7 @@
 
     function updateHUDNames() {
         const local = getLocalPlayer();
-        mainArenaTag.textContent = `TU TABLERO ${local.char.avatar}`;
+        mainArenaTag.textContent = `${local.name.toUpperCase()} ${local.char.avatar}`;
         mainArenaTag.style.color = local.char.color;
 
         avatarP1.textContent = players[0].char.avatar;
@@ -701,11 +730,11 @@
 
         const rivals = getRivalsForLocalPlayer();
         if (rivals[0]) {
-            rivalMiniAvatar1.textContent = rivals[0].char.avatar;
+            rivalMiniAvatar1.textContent = `${rivals[0].char.avatar} ${rivals[0].name}`;
             rivalMiniScore1.textContent = `⭐ ${rivals[0].score}`;
         }
         if (rivals[1] && maxPlayers === 3) {
-            rivalMiniAvatar2.textContent = rivals[1].char.avatar;
+            rivalMiniAvatar2.textContent = `${rivals[1].char.avatar} ${rivals[1].name}`;
             rivalMiniScore2.textContent = `⭐ ${rivals[1].score}`;
         }
     }
@@ -827,6 +856,7 @@
         // GUARANTEED PROCEDURAL LEVEL: 100% solvable, infinite unique layouts!
         const seed = syncSeed || (Date.now() + levelIdx * 1337 + currentRoundNumber * 97);
         const baseTemplate = generateProceduralLevel(seed);
+        currentBaseTemplate = cloneLevelData(baseTemplate);
 
         // Initialize all active players with identical procedural puzzle boards
         players.slice(0, maxPlayers).forEach(p => {
@@ -911,19 +941,22 @@
         board.bgCanvas = bgCanvas;
     }
 
-    function resetCurrentPlayerBoard(p) {
-        const baseLevel = generateProceduralLevel(Date.now() + currentLevelIndex * 777);
+    function resetCurrentPlayerBoard(p, isRemote = false) {
+        if (!currentBaseTemplate) return;
 
-        p.board = cloneLevelData(baseLevel);
+        p.board = cloneLevelData(currentBaseTemplate);
         cacheBoardBackground(p.board);
         p.x = p.board.playerSpawn.x;
         p.y = p.board.playerSpawn.y;
         p.px = p.x * getTileSize(p.board);
         p.py = p.y * getTileSize(p.board);
-        window.sounds.playMove();
-        showToast(`Tablero reiniciado ✨`, 1200);
+        clearPlayerDebuffs(p);
 
-        sendNetworkMessage({ type: 'BOARD_RESET', playerId: p.id });
+        if (!isRemote) {
+            window.sounds.playMove();
+            showToast(`Tablero reiniciado ✨`, 1200);
+            sendNetworkMessage({ type: 'BOARD_RESET', playerId: p.id });
+        }
     }
 
     function clearPlayerDebuffs(p) {
@@ -1169,12 +1202,12 @@
     function showRoundWinCelebration(winner) {
         roundWinTitle.textContent = `¡RONDA ${currentRoundNumber} COMPLETADA!`;
         roundWinAvatar.textContent = winner.char.avatar;
-        roundWinName.textContent = `¡Ronda ganada por ${winner.char.avatar}! 🌻`;
+        roundWinName.textContent = `¡Ronda ganada por ${winner.name} (${winner.char.avatar})! 🌻`;
 
         // Render scores of all active players
         const activePlayers = players.slice(0, maxPlayers);
         roundWinScoreboard.innerHTML = activePlayers
-            .map(p => `<span>${p.char.avatar}: <strong>${p.score}</strong></span>`)
+            .map(p => `<span>${p.name} ${p.char.avatar}: <strong>${p.score}</strong></span>`)
             .join(' • ');
 
         roundWinModal.style.display = 'flex';
@@ -1202,12 +1235,12 @@
         const activePlayers = players.slice(0, maxPlayers);
         activePlayers.sort((a, b) => b.score - a.score);
 
-        winTitle.textContent = `🎉 ¡EL GANADOR ES ${winner.char.avatar}! 🎉`;
+        winTitle.textContent = `🎉 ¡EL GANADOR ES ${winner.name.toUpperCase()} (${winner.char.avatar})! 🎉`;
         winTitle.className = 'win-title p1-color';
 
         const podiumText = activePlayers.map((p, idx) => {
             const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : '🥉');
-            return `${medal} ${p.char.avatar}: ${p.score} rondas`;
+            return `${medal} ${p.name} (${p.char.avatar}): ${p.score} rondas`;
         }).join('<br>');
 
         winDesc.innerHTML = `<strong>¡Podio Campestre!</strong><br>${podiumText}`;
@@ -1823,7 +1856,8 @@
         if (waitingSubtitle) waitingSubtitle.textContent = "Pásale este código o link a tus amigos:";
         if (btnCopyLink) btnCopyLink.style.display = 'inline-block';
         if (btnStartOnlineNow) btnStartOnlineNow.style.display = 'block';
-        if (waitName1) waitName1.textContent = `J1 (Tú - ${players[0].char.avatar})`;
+        players[0].name = localPlayerName;
+        if (waitName1) waitName1.textContent = `J1 (${localPlayerName} - ${players[0].char.avatar})`;
         if (waitRow1) waitRow1.className = 'waiting-player-row ready';
         if (waitRow2) {
             waitRow2.className = 'waiting-player-row waiting';
@@ -1866,10 +1900,10 @@
 
                 if (assignedPlayerId === 2) {
                     waitRow2.className = 'waiting-player-row ready';
-                    waitName2.textContent = `J2 (${players[1].char.avatar} Conectado)`;
+                    waitName2.textContent = `J2 (${players[1].name} - ${players[1].char.avatar} Conectado)`;
                 } else if (assignedPlayerId === 3) {
                     waitRow3.className = 'waiting-player-row ready';
-                    waitName3.textContent = `J3 (${players[2].char.avatar} Conectado)`;
+                    waitName3.textContent = `J3 (${players[2].name} - ${players[2].char.avatar} Conectado)`;
                 }
 
                 const sendInit = () => {
@@ -1882,6 +1916,7 @@
                                 gameType: selectedGameType,
                                 targetScore,
                                 hostCharId: selectedCharId,
+                                hostName: localPlayerName,
                                 roomCode: roomCode
                             });
                         }
@@ -1968,7 +2003,7 @@
         if (btnStartOnlineNow) btnStartOnlineNow.style.display = 'none';
         if (waitName1) waitName1.textContent = 'J1 (Anfitrión - Conectando...)';
         if (waitRow1) waitRow1.className = 'waiting-player-row waiting';
-        if (waitName2) waitName2.textContent = `J2 (Tú - ${CHARACTERS[selectedCharId].avatar})`;
+        if (waitName2) waitName2.textContent = `J2 (${localPlayerName} - ${CHARACTERS[selectedCharId].avatar})`;
         if (waitRow2) waitRow2.className = 'waiting-player-row ready';
         if (waitRow3) waitRow3.style.display = 'none';
         waitingBox.style.display = 'block';
@@ -2008,7 +2043,8 @@
                             clientConn.send({
                                 type: 'CHAR_SELECT',
                                 playerId: localPlayerId || 2,
-                                charId: selectedCharId
+                                charId: selectedCharId,
+                                name: localPlayerName
                             });
                         }
                     } catch(e) {}
@@ -2076,23 +2112,25 @@
             maxPlayers = data.maxPlayers;
             selectedGameType = data.gameType;
             if (data.targetScore) targetScore = data.targetScore;
+            if (data.hostName && players[0]) players[0].name = data.hostName;
             if (data.hostCharId && players[0]) {
                 players[0].char = CHARACTERS[data.hostCharId] || players[0].char;
             }
             if (players[localPlayerId - 1]) {
+                players[localPlayerId - 1].name = localPlayerName;
                 players[localPlayerId - 1].char = CHARACTERS[selectedCharId] || players[localPlayerId - 1].char;
             }
 
             if (waitingTitle) waitingTitle.textContent = "¡CONECTADO A LA SALA ONLINE!";
             if (waitingSubtitle) waitingSubtitle.textContent = "Esperando a que el anfitrión inicie la partida... 🍃";
-            if (waitName1) waitName1.textContent = `J1 (Anfitrión - ${players[0].char.avatar})`;
+            if (waitName1) waitName1.textContent = `J1 (${players[0].name} - ${players[0].char.avatar})`;
             if (waitRow1) waitRow1.className = 'waiting-player-row ready';
-            if (waitName2) waitName2.textContent = `J2 (${localPlayerId === 2 ? 'Tú - ' : ''}${players[1].char.avatar})`;
+            if (waitName2) waitName2.textContent = `J2 (${players[1].name} - ${players[1].char.avatar})`;
             if (waitRow2) waitRow2.className = 'waiting-player-row ready';
             if (maxPlayers === 3) {
                 if (waitRow3) {
                     waitRow3.style.display = 'flex';
-                    waitName3.textContent = `J3 (${localPlayerId === 3 ? 'Tú - ' : ''}${players[2].char.avatar})`;
+                    waitName3.textContent = `J3 (${players[2].name} - ${players[2].char.avatar})`;
                     if (localPlayerId === 3) waitRow3.className = 'waiting-player-row ready';
                 }
             } else if (waitRow3) {
@@ -2103,15 +2141,26 @@
             sendNetworkMessage({
                 type: 'CHAR_SELECT',
                 playerId: localPlayerId,
-                charId: selectedCharId
+                charId: selectedCharId,
+                name: localPlayerName
             });
         } else if (data.type === 'CHAR_SELECT') {
             const char = CHARACTERS[data.charId];
             const pIdx = (data.playerId || 2) - 1;
-            if (char && players[pIdx]) {
-                players[pIdx].char = char;
-                if (pIdx === 1 && waitName2) waitName2.textContent = `J2 (${char.avatar} Conectado)`;
-                if (pIdx === 2 && waitName3) waitName3.textContent = `J3 (${char.avatar} Conectado)`;
+            if (players[pIdx]) {
+                if (char) players[pIdx].char = char;
+                if (data.name) players[pIdx].name = data.name;
+                if (pIdx === 1 && waitName2) waitName2.textContent = `J2 (${players[1].name} - ${players[1].char.avatar} Conectado)`;
+                if (pIdx === 2 && waitName3) waitName3.textContent = `J3 (${players[2].name} - ${players[2].char.avatar} Conectado)`;
+                updateHUDNames();
+            }
+        } else if (data.type === 'PLAYER_NAME_UPDATE') {
+            const p = players[data.playerId - 1];
+            if (p && data.name) {
+                p.name = data.name;
+                if (data.playerId === 1 && waitName1) waitName1.textContent = `J1 (${p.name} - ${p.char.avatar})`;
+                if (data.playerId === 2 && waitName2) waitName2.textContent = `J2 (${p.name} - ${p.char.avatar} Conectado)`;
+                if (data.playerId === 3 && waitName3) waitName3.textContent = `J3 (${p.name} - ${p.char.avatar} Conectado)`;
                 updateHUDNames();
             }
         } else if (data.type === 'HOST_START_NOW') {
@@ -2236,7 +2285,7 @@
             resetMatch(data.seed);
         } else if (data.type === 'BOARD_RESET') {
             const p = players[data.playerId - 1];
-            if (p) resetCurrentPlayerBoard(p);
+            if (p) resetCurrentPlayerBoard(p, true);
         }
     }
 

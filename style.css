@@ -360,6 +360,36 @@ body::before {
 }
 .btn-outline:active { transform: translateY(2px); box-shadow: none; }
 
+.player-name-section {
+    margin-bottom: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.input-player-name {
+    font-family: var(--font-body);
+    font-size: 1.15rem;
+    font-weight: 800;
+    padding: 9px 18px;
+    background: #fff;
+    border: 3px solid var(--ac-leaf-green);
+    border-radius: 20px;
+    color: var(--ac-wood-dark);
+    text-align: center;
+    max-width: 280px;
+    width: 90%;
+    box-shadow: 0 4px 10px rgba(94, 168, 72, 0.15);
+    transition: all 0.2s ease;
+}
+
+.input-player-name:focus {
+    outline: none;
+    border-color: var(--ac-honey);
+    box-shadow: 0 0 12px rgba(229, 157, 53, 0.4);
+}
+
 .input-code {
     font-family: var(--font-body);
     font-size: 1.2rem;
