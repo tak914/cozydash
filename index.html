@@ -9,8 +9,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;800&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    <!-- PeerJS for direct WebRTC multiplayer -->
+    <!-- PeerJS for direct WebRTC multiplayer with automatic CDN fallback -->
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script>
+        if (typeof Peer === 'undefined') {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"><\/script>');
+        }
+    </script>
 </head>
 <body>
     <!-- Alert Toast -->

@@ -170,6 +170,7 @@
     let netConnections = []; // Array of active client connections for Host
     let clientConn = null;   // Single connection for Client to Host
     let isHost = false;
+    let nextSynchronizedSeed = null;
 
     // Particles System
     let particles = [];
@@ -243,8 +244,14 @@
         btnCopyLink.addEventListener('click', copyDirectLink);
         btnStartOnlineNow.addEventListener('click', () => {
             if (isHost) {
-                broadcast({ type: 'HOST_START_NOW' });
-                startBattle('online_host');
+                const initialSeed = Math.floor(Math.random() * 1000000000);
+                broadcast({
+                    type: 'HOST_START_NOW',
+                    seed: initialSeed,
+                    gameType: selectedGameType,
+                    targetScore: targetScore
+                });
+                startBattle('online_host', initialSeed);
             }
         });
 
@@ -255,7 +262,18 @@
 
         btnExitGame.addEventListener('click', returnToLobby);
         btnWinExit.addEventListener('click', returnToLobby);
-        btnRematch.addEventListener('click', resetMatch);
+        btnRematch.addEventListener('click', () => {
+            if (isHost) {
+                const nextSeed = Math.floor(Math.random() * 1000000000);
+                broadcast({ type: 'MATCH_RESTART', targetScore, seed: nextSeed });
+                resetMatch(nextSeed);
+            } else if (matchSessionMode === 'local') {
+                resetMatch();
+            } else {
+                sendNetworkMessage({ type: 'REQUEST_REMATCH' });
+                showToast("Solicitud de revancha enviada...", 2000);
+            }
+        });
 
         btnTouchPower.addEventListener('pointerdown', (e) => {
             e.preventDefault();
@@ -329,6 +347,11 @@
     function skipRoundWinCelebration() {
         if (!isRoundTransitioning || roundWinModal.style.display !== 'flex') return;
 
+        if (!isHost && matchSessionMode === 'online_client') {
+            sendNetworkMessage({ type: 'REQUEST_SKIP_MODAL' });
+            return;
+        }
+
         if (roundTransitionTimeout) {
             clearTimeout(roundTransitionTimeout);
             roundTransitionTimeout = null;
@@ -337,7 +360,16 @@
         roundWinModal.style.display = 'none';
         isRoundTransitioning = false;
         currentRoundNumber++;
-        loadRoundLevel(currentLevelIndex + 1);
+
+        if (isHost && matchSessionMode === 'online_host') {
+            broadcast({
+                type: 'SKIP_ROUND_MODAL',
+                nextSeed: nextSynchronizedSeed,
+                roundNumber: currentRoundNumber
+            });
+        }
+
+        loadRoundLevel(currentLevelIndex + 1, nextSynchronizedSeed);
     }
 
     // -------------------------------------------------------------
@@ -578,7 +610,7 @@
     // -------------------------------------------------------------
     // Match Flow & Setup
     // -------------------------------------------------------------
-    function startBattle(sessionMode) {
+    function startBattle(sessionMode, syncSeed = null) {
         matchSessionMode = sessionMode;
         lobbyScreen.style.display = 'none';
         gameScreen.style.display = 'flex';
@@ -601,10 +633,18 @@
         });
 
         // Setup characters without fictional names
-        players[0].char = CHARACTERS[selectedCharId];
-        const remainingChars = Object.keys(CHARACTERS).filter(k => k !== selectedCharId);
-        players[1].char = CHARACTERS[remainingChars[0] || 'matcha'];
-        players[2].char = CHARACTERS[remainingChars[1] || 'boba'];
+        if (sessionMode === 'local' || sessionMode === 'online_host') {
+            players[0].char = CHARACTERS[selectedCharId];
+            const remainingChars = Object.keys(CHARACTERS).filter(k => k !== selectedCharId);
+            if (sessionMode === 'local') {
+                players[1].char = CHARACTERS[remainingChars[0] || 'matcha'];
+                players[2].char = CHARACTERS[remainingChars[1] || 'boba'];
+            }
+        } else if (sessionMode === 'online_client') {
+            if (players[localPlayerId - 1]) {
+                players[localPlayerId - 1].char = CHARACTERS[selectedCharId];
+            }
+        }
 
         // Assign bot flag for local matches
         if (sessionMode === 'local') {
@@ -643,7 +683,7 @@
             stopTimeAttackTimer();
         }
 
-        loadRoundLevel(0);
+        loadRoundLevel(0, syncSeed);
     }
 
     function updateHUDNames() {
@@ -666,7 +706,7 @@
         }
     }
 
-    function resetMatch() {
+    function resetMatch(syncSeed = null) {
         winModal.style.display = 'none';
         roundWinModal.style.display = 'none';
         isMatchOver = false;
@@ -692,11 +732,7 @@
             hudModeMeta.textContent = `META: ${targetScore} RONDAS`;
         }
 
-        loadRoundLevel(0);
-
-        if (netConnections.length > 0 && isHost) {
-            broadcast({ type: 'MATCH_RESTART', gameType: selectedGameType, targetScore });
-        }
+        loadRoundLevel(0, syncSeed);
     }
 
     // -------------------------------------------------------------
@@ -1055,6 +1091,15 @@
 
         if (allTargetsCovered && !isMatchOver && !isRoundTransitioning) {
             isRoundTransitioning = true;
+
+            if (matchSessionMode === 'online_client') {
+                sendNetworkMessage({
+                    type: 'CLAIM_ROUND_WIN',
+                    winnerId: player.id
+                });
+                return;
+            }
+
             player.score++;
             updateScoreboard();
             window.sounds.playLevelWin();
@@ -1087,7 +1132,10 @@
                 }, 400);
 
             } else {
-                // PvP Mode: Show Round Win Celebration Modal (Can be skipped by touching!)
+                // PvP Mode: Show Round Win Celebration Modal
+                const nextSeed = Math.floor(Math.random() * 1000000000);
+                nextSynchronizedSeed = nextSeed;
+
                 showRoundWinCelebration(player);
 
                 if (isHost) {
@@ -1096,7 +1144,7 @@
                         winnerId: player.id,
                         scores: players.map(p => p.score),
                         roundNumber: currentRoundNumber,
-                        nextLevelIndex: currentLevelIndex + 1
+                        nextSeed: nextSeed
                     });
                 }
 
@@ -1778,7 +1826,7 @@
             netConnections.push(conn);
             const assignedPlayerId = netConnections.length + 1;
 
-            conn.on('open', () => {
+            const setupHostConnection = () => {
                 showToast(`¡Amigo conectado como Jugador ${assignedPlayerId}!`, 2500);
 
                 if (assignedPlayerId === 2) {
@@ -1800,11 +1848,23 @@
 
                 if (netConnections.length === maxPlayers - 1) {
                     setTimeout(() => {
-                        broadcast({ type: 'HOST_START_NOW' });
-                        startBattle('online_host');
-                    }, 1000);
+                        const initialSeed = Math.floor(Math.random() * 1000000000);
+                        broadcast({
+                            type: 'HOST_START_NOW',
+                            seed: initialSeed,
+                            gameType: selectedGameType,
+                            targetScore
+                        });
+                        startBattle('online_host', initialSeed);
+                    }, 1200);
                 }
-            });
+            };
+
+            if (conn.open) {
+                setupHostConnection();
+            } else {
+                conn.on('open', setupHostConnection);
+            }
 
             conn.on('data', data => {
                 netConnections.forEach(c => {
@@ -1850,13 +1910,19 @@
             isHost = false;
             clientConn = peer.connect(hostPeerId, { reliable: true });
 
-            clientConn.on('open', () => {
+            const setupClientConn = () => {
                 showToast("¡Conectado con éxito a la sala!", 2500);
                 clientConn.send({
                     type: 'CHAR_SELECT',
                     charId: selectedCharId
                 });
-            });
+            };
+
+            if (clientConn.open) {
+                setupClientConn();
+            } else {
+                clientConn.on('open', setupClientConn);
+            }
 
             clientConn.on('data', data => {
                 handleNetworkMessage(data);
@@ -1894,10 +1960,85 @@
             maxPlayers = data.maxPlayers;
             selectedGameType = data.gameType;
             if (data.targetScore) targetScore = data.targetScore;
-            if (data.hostCharId) players[0].char = CHARACTERS[data.hostCharId];
+            if (data.hostCharId && players[0]) players[0].char = CHARACTERS[data.hostCharId] || players[0].char;
+            if (players[localPlayerId - 1]) players[localPlayerId - 1].char = CHARACTERS[selectedCharId] || players[localPlayerId - 1].char;
             showToast(`¡Unido como Jugador ${localPlayerId}!`, 2500);
+            sendNetworkMessage({
+                type: 'CHAR_SELECT',
+                playerId: localPlayerId,
+                charId: selectedCharId
+            });
+        } else if (data.type === 'CHAR_SELECT') {
+            const char = CHARACTERS[data.charId];
+            const pIdx = (data.playerId || 2) - 1;
+            if (char && players[pIdx]) {
+                players[pIdx].char = char;
+                if (pIdx === 1 && waitName2) waitName2.textContent = `J2 (${char.avatar} Conectado)`;
+                if (pIdx === 2 && waitName3) waitName3.textContent = `J3 (${char.avatar} Conectado)`;
+                updateHUDNames();
+            }
         } else if (data.type === 'HOST_START_NOW') {
-            startBattle('online_client');
+            if (data.gameType) selectedGameType = data.gameType;
+            if (data.targetScore) targetScore = data.targetScore;
+            startBattle('online_client', data.seed);
+        } else if (data.type === 'CLAIM_ROUND_WIN') {
+            if (isHost && !isRoundTransitioning && !isMatchOver) {
+                const winner = players[data.winnerId - 1];
+                if (winner) {
+                    isRoundTransitioning = true;
+                    winner.score++;
+                    updateScoreboard();
+                    window.sounds.playLevelWin();
+
+                    const nextSeed = Math.floor(Math.random() * 1000000000);
+                    nextSynchronizedSeed = nextSeed;
+
+                    roundHistory.push({
+                        round: currentRoundNumber,
+                        winnerId: winner.id,
+                        winnerChar: winner.char
+                    });
+                    renderRoundHistory();
+                    showRoundWinCelebration(winner);
+
+                    broadcast({
+                        type: 'ROUND_WIN',
+                        winnerId: winner.id,
+                        scores: players.map(p => p.score),
+                        roundNumber: currentRoundNumber,
+                        nextSeed: nextSeed
+                    });
+
+                    if (winner.score >= targetScore) {
+                        roundTransitionTimeout = setTimeout(() => {
+                            triggerMatchWin(winner);
+                        }, 2400);
+                    } else {
+                        roundTransitionTimeout = setTimeout(() => {
+                            skipRoundWinCelebration();
+                        }, 2400);
+                    }
+                }
+            }
+        } else if (data.type === 'REQUEST_SKIP_MODAL') {
+            if (isHost && isRoundTransitioning) {
+                skipRoundWinCelebration();
+            }
+        } else if (data.type === 'SKIP_ROUND_MODAL') {
+            if (roundTransitionTimeout) {
+                clearTimeout(roundTransitionTimeout);
+                roundTransitionTimeout = null;
+            }
+            roundWinModal.style.display = 'none';
+            isRoundTransitioning = false;
+            currentRoundNumber = data.roundNumber || (currentRoundNumber + 1);
+            loadRoundLevel(currentLevelIndex + 1, data.nextSeed);
+        } else if (data.type === 'REQUEST_REMATCH') {
+            if (isHost) {
+                const nextSeed = Math.floor(Math.random() * 1000000000);
+                broadcast({ type: 'MATCH_RESTART', targetScore, seed: nextSeed });
+                resetMatch(nextSeed);
+            }
         } else if (data.type === 'PLAYER_MOVE') {
             const p = players[data.playerId - 1];
             if (p) {
@@ -1928,6 +2069,7 @@
             window.sounds.playShield();
         } else if (data.type === 'ROUND_WIN') {
             const winner = players[data.winnerId - 1];
+            nextSynchronizedSeed = data.nextSeed;
             if (data.scores) {
                 data.scores.forEach((s, idx) => {
                     if (players[idx]) players[idx].score = s;
@@ -1954,7 +2096,7 @@
             triggerTimeAttackOver();
         } else if (data.type === 'MATCH_RESTART') {
             if (data.targetScore) targetScore = data.targetScore;
-            resetMatch();
+            resetMatch(data.seed);
         } else if (data.type === 'BOARD_RESET') {
             const p = players[data.playerId - 1];
             if (p) resetCurrentPlayerBoard(p);
