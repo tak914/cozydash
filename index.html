@@ -114,10 +114,10 @@
             </div>
         </div>
 
-        <!-- Waiting Host Overlay -->
+        <!-- Waiting Host/Client Overlay -->
         <div id="waiting-box" class="waiting-box">
-            <div class="waiting-title">SALA CREADA: ESPERANDO JUGADORES...</div>
-            <p style="color: var(--ac-wood-light); font-size: 0.9rem; margin-bottom: 12px;">Pásale este código o link a tus amigos:</p>
+            <div class="waiting-title" id="waiting-title">SALA CREADA: ESPERANDO JUGADORES...</div>
+            <p id="waiting-subtitle" style="color: var(--ac-wood-light); font-size: 0.9rem; margin-bottom: 12px;">Pásale este código o link a tus amigos:</p>
             <div class="waiting-code-row">
                 <span id="display-room-code" class="room-code-tag">-----</span>
                 <button id="btn-copy-link" class="btn btn-gold" style="font-size: 0.9rem;">Copiar Enlace Directo</button>
@@ -135,6 +135,7 @@
                 </div>
             </div>
             <button id="btn-start-online-now" class="btn btn-leaf" style="margin-top: 12px; width: 100%; display: none;">¡Empezar Partida Ahora!</button>
+            <button id="btn-cancel-waiting" class="btn btn-outline" style="margin-top: 8px; width: 100%; font-size: 0.85rem;">Salir de la sala</button>
         </div>
 
         <!-- Quick Local Play -->

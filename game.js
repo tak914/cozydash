@@ -42,8 +42,11 @@
     const inputRoomCode = document.getElementById('input-room-code');
     const waitingBox = document.getElementById('waiting-box');
     const displayRoomCode = document.getElementById('display-room-code');
+    const waitingTitle = document.getElementById('waiting-title');
+    const waitingSubtitle = document.getElementById('waiting-subtitle');
     const btnCopyLink = document.getElementById('btn-copy-link');
     const btnStartOnlineNow = document.getElementById('btn-start-online-now');
+    const btnCancelWaiting = document.getElementById('btn-cancel-waiting');
     const toastBanner = document.getElementById('toast-banner');
 
     // Lobby Waiting Slots
@@ -262,6 +265,7 @@
 
         btnExitGame.addEventListener('click', returnToLobby);
         btnWinExit.addEventListener('click', returnToLobby);
+        if (btnCancelWaiting) btnCancelWaiting.addEventListener('click', returnToLobby);
         btnRematch.addEventListener('click', () => {
             if (isHost) {
                 const nextSeed = Math.floor(Math.random() * 1000000000);
@@ -1782,8 +1786,24 @@
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun2.l.google.com:19302' },
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject@gmail.com',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject@gmail.com',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject@gmail.com',
+                    credential: 'openrelayproject'
+                }
+            ],
+            iceCandidatePoolSize: 10
         }
     };
 
@@ -1799,11 +1819,27 @@
         const peerId = `sdash-${roomCode}`;
 
         displayRoomCode.textContent = roomCode;
+        if (waitingTitle) waitingTitle.textContent = "SALA CREADA: ESPERANDO JUGADORES...";
+        if (waitingSubtitle) waitingSubtitle.textContent = "Pásale este código o link a tus amigos:";
+        if (btnCopyLink) btnCopyLink.style.display = 'inline-block';
+        if (btnStartOnlineNow) btnStartOnlineNow.style.display = 'block';
+        if (waitName1) waitName1.textContent = `J1 (Tú - ${players[0].char.avatar})`;
+        if (waitRow1) waitRow1.className = 'waiting-player-row ready';
+        if (waitRow2) {
+            waitRow2.className = 'waiting-player-row waiting';
+            waitName2.textContent = 'J2 (Esperando...)';
+        }
+        if (waitRow3) {
+            waitRow3.style.display = maxPlayers === 3 ? 'flex' : 'none';
+            waitRow3.className = 'waiting-player-row waiting';
+            waitName3.textContent = 'J3 (Esperando...)';
+        }
         waitingBox.style.display = 'block';
-        showToast("Conectando con el servidor PeerJS...");
+        showToast("Conectando con el servidor PeerJS...", 2000);
 
         if (peer) {
             try { peer.destroy(); } catch(e) {}
+            peer = null;
         }
 
         peer = new Peer(peerId, PEER_CONFIG);
@@ -1812,7 +1848,6 @@
         peer.on('open', () => {
             isHost = true;
             localPlayerId = 1;
-            btnStartOnlineNow.style.display = 'block';
             showToast(`¡Sala ${roomCode} lista! Invita hasta ${maxPlayers - 1} amigos.`, 4000);
         });
 
@@ -1837,14 +1872,25 @@
                     waitName3.textContent = `J3 (${players[2].char.avatar} Conectado)`;
                 }
 
-                conn.send({
-                    type: 'INIT_ROOM_JOIN',
-                    assignedPlayerId,
-                    maxPlayers,
-                    gameType: selectedGameType,
-                    targetScore,
-                    hostCharId: selectedCharId
-                });
+                const sendInit = () => {
+                    try {
+                        if (conn.open) {
+                            conn.send({
+                                type: 'INIT_ROOM_JOIN',
+                                assignedPlayerId,
+                                maxPlayers,
+                                gameType: selectedGameType,
+                                targetScore,
+                                hostCharId: selectedCharId,
+                                roomCode: roomCode
+                            });
+                        }
+                    } catch(e) {
+                        console.error("Error sending init:", e);
+                    }
+                };
+                sendInit();
+                setTimeout(sendInit, 250);
 
                 if (netConnections.length === maxPlayers - 1) {
                     setTimeout(() => {
@@ -1876,46 +1922,99 @@
             conn.on('close', () => {
                 netConnections = netConnections.filter(c => c !== conn);
                 showToast(`Un jugador se ha desconectado.`, 3000);
+                if (assignedPlayerId === 2 && waitName2) {
+                    waitRow2.className = 'waiting-player-row waiting';
+                    waitName2.textContent = 'J2 (Desconectado)';
+                } else if (assignedPlayerId === 3 && waitName3) {
+                    waitRow3.className = 'waiting-player-row waiting';
+                    waitName3.textContent = 'J3 (Desconectado)';
+                }
+            });
+
+            conn.on('error', err => {
+                console.error("Host conn error:", err);
             });
         });
 
         peer.on('error', err => {
             console.error("Peer error:", err);
             if (err.type === 'unavailable-id') {
-                showToast("Código en uso, reintentando...", 2500);
-                setTimeout(startOnlineHost, 500);
+                showToast("Código en uso, reintentando...", 2000);
+                setTimeout(startOnlineHost, 400);
             } else {
-                showToast("Error de conexión PeerJS: " + err.type, 4000);
+                showToast("Error de conexión PeerJS: " + (err.message || err.type || err), 4000);
             }
         });
     }
 
     function startOnlineClient() {
-        const roomCode = inputRoomCode.value.trim().toUpperCase();
+        const rawCode = inputRoomCode.value.trim().toUpperCase();
+        const roomCode = rawCode.replace(/[^A-Z0-9]/g, '');
         if (!roomCode || roomCode.length < 4) {
-            alert("Por favor ingresa un código de sala válido (5 letras).");
+            alert("Por favor ingresa un código de sala válido (ej: K7L9X).");
             return;
         }
 
         const hostPeerId = `sdash-${roomCode}`;
-        showToast(`Buscando la sala ${roomCode}...`);
+        const clientPeerId = `sdash-c-${roomCode}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        showToast(`Buscando la sala ${roomCode}...`, 5000);
+
+        // Immediate Visual Feedback in Lobby
+        displayRoomCode.textContent = roomCode;
+        if (waitingTitle) waitingTitle.textContent = `BUSCANDO SALA ${roomCode}...`;
+        if (waitingSubtitle) waitingSubtitle.textContent = "Estableciendo conexión P2P con el anfitrión...";
+        if (btnCopyLink) btnCopyLink.style.display = 'none';
+        if (btnStartOnlineNow) btnStartOnlineNow.style.display = 'none';
+        if (waitName1) waitName1.textContent = 'J1 (Anfitrión - Conectando...)';
+        if (waitRow1) waitRow1.className = 'waiting-player-row waiting';
+        if (waitName2) waitName2.textContent = `J2 (Tú - ${CHARACTERS[selectedCharId].avatar})`;
+        if (waitRow2) waitRow2.className = 'waiting-player-row ready';
+        if (waitRow3) waitRow3.style.display = 'none';
+        waitingBox.style.display = 'block';
 
         if (peer) {
             try { peer.destroy(); } catch(e) {}
+            peer = null;
         }
 
-        peer = new Peer(PEER_CONFIG);
+        // Provide explicit client ID so PeerJS skips _retrieveId HTTP GET round-trip!
+        peer = new Peer(clientPeerId, PEER_CONFIG);
+
+        let connectionEstablished = false;
+        const connectTimeout = setTimeout(() => {
+            if (!connectionEstablished) {
+                showToast(`⏳ No se pudo conectar con la sala ${roomCode}. Verifica que el anfitrión siga en la sala y el código sea correcto.`, 6000);
+                if (waitingSubtitle) waitingSubtitle.textContent = `⚠️ No hubo respuesta de la sala ${roomCode}. Revisa el código.`;
+            }
+        }, 12000);
 
         peer.on('open', () => {
             isHost = false;
             clientConn = peer.connect(hostPeerId, { reliable: true });
 
             const setupClientConn = () => {
+                connectionEstablished = true;
+                clearTimeout(connectTimeout);
                 showToast("¡Conectado con éxito a la sala!", 2500);
-                clientConn.send({
-                    type: 'CHAR_SELECT',
-                    charId: selectedCharId
-                });
+
+                if (waitingTitle) waitingTitle.textContent = "¡CONECTADO A LA SALA ONLINE!";
+                if (waitingSubtitle) waitingSubtitle.textContent = "Esperando a que el anfitrión inicie la partida... 🍃";
+                if (waitRow1) waitRow1.className = 'waiting-player-row ready';
+
+                const sendChar = () => {
+                    try {
+                        if (clientConn.open) {
+                            clientConn.send({
+                                type: 'CHAR_SELECT',
+                                playerId: localPlayerId || 2,
+                                charId: selectedCharId
+                            });
+                        }
+                    } catch(e) {}
+                };
+                sendChar();
+                setTimeout(sendChar, 250);
             };
 
             if (clientConn.open) {
@@ -1925,7 +2024,16 @@
             }
 
             clientConn.on('data', data => {
+                connectionEstablished = true;
+                clearTimeout(connectTimeout);
                 handleNetworkMessage(data);
+            });
+
+            clientConn.on('error', err => {
+                console.error("Client conn error:", err);
+                connectionEstablished = true;
+                clearTimeout(connectTimeout);
+                showToast("Error de conexión con el anfitrión: " + (err.message || err.type || err), 4000);
             });
 
             clientConn.on('close', () => {
@@ -1936,7 +2044,15 @@
 
         peer.on('error', err => {
             console.error("Peer error:", err);
-            showToast("No se encontró la sala " + roomCode + ". Verifica el código.", 4500);
+            clearTimeout(connectTimeout);
+            if (err.type === 'peer-unavailable') {
+                showToast(`No se encontró la sala ${roomCode}. Verifica que el código esté bien escrito y la sala siga abierta.`, 5000);
+                if (waitingSubtitle) waitingSubtitle.textContent = `❌ La sala ${roomCode} no existe o ya se cerró.`;
+            } else if (err.type === 'network' || err.type === 'server-error') {
+                showToast("Error de red con el servidor PeerJS. Revisa tu conexión a internet.", 4000);
+            } else {
+                showToast("Error PeerJS: " + (err.message || err.type || err), 4000);
+            }
         });
     }
 
@@ -1960,9 +2076,30 @@
             maxPlayers = data.maxPlayers;
             selectedGameType = data.gameType;
             if (data.targetScore) targetScore = data.targetScore;
-            if (data.hostCharId && players[0]) players[0].char = CHARACTERS[data.hostCharId] || players[0].char;
-            if (players[localPlayerId - 1]) players[localPlayerId - 1].char = CHARACTERS[selectedCharId] || players[localPlayerId - 1].char;
+            if (data.hostCharId && players[0]) {
+                players[0].char = CHARACTERS[data.hostCharId] || players[0].char;
+            }
+            if (players[localPlayerId - 1]) {
+                players[localPlayerId - 1].char = CHARACTERS[selectedCharId] || players[localPlayerId - 1].char;
+            }
+
+            if (waitingTitle) waitingTitle.textContent = "¡CONECTADO A LA SALA ONLINE!";
+            if (waitingSubtitle) waitingSubtitle.textContent = "Esperando a que el anfitrión inicie la partida... 🍃";
+            if (waitName1) waitName1.textContent = `J1 (Anfitrión - ${players[0].char.avatar})`;
+            if (waitRow1) waitRow1.className = 'waiting-player-row ready';
+            if (waitName2) waitName2.textContent = `J2 (${localPlayerId === 2 ? 'Tú - ' : ''}${players[1].char.avatar})`;
+            if (waitRow2) waitRow2.className = 'waiting-player-row ready';
+            if (maxPlayers === 3) {
+                if (waitRow3) {
+                    waitRow3.style.display = 'flex';
+                    waitName3.textContent = `J3 (${localPlayerId === 3 ? 'Tú - ' : ''}${players[2].char.avatar})`;
+                    if (localPlayerId === 3) waitRow3.className = 'waiting-player-row ready';
+                }
+            } else if (waitRow3) {
+                waitRow3.style.display = 'none';
+            }
             showToast(`¡Unido como Jugador ${localPlayerId}!`, 2500);
+
             sendNetworkMessage({
                 type: 'CHAR_SELECT',
                 playerId: localPlayerId,
@@ -2135,13 +2272,19 @@
         updateLobbyRecordDisplay();
 
         if (clientConn) {
-            clientConn.close();
+            try { clientConn.close(); } catch(e) {}
             clientConn = null;
         }
         if (netConnections.length > 0) {
-            netConnections.forEach(c => c.close());
+            netConnections.forEach(c => { try { c.close(); } catch(e) {} });
             netConnections = [];
         }
+        if (peer) {
+            try { peer.destroy(); } catch(e) {}
+            peer = null;
+        }
+        isHost = false;
+        localPlayerId = 1;
     }
 
     window.addEventListener('DOMContentLoaded', init);
